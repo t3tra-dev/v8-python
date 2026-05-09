@@ -29,7 +29,7 @@ jobs:
       - name: Sync Python tooling
         run: uv sync --locked --only-group dev --no-install-project
       - name: Generate Python stubs
-        run: cargo run --bin stub_gen
+        run: cargo run --manifest-path Cargo.toml --package v8-python --bin stub_gen
       - name: Ruff
         run: uv run --no-sync ruff check .
       - name: Pyright

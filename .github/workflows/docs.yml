@@ -26,7 +26,7 @@ jobs:
       - name: Sync documentation dependencies
         run: uv sync --locked --only-group doc --no-install-project
       - name: Generate API reference stubs
-        run: cargo run --bin stub_gen
+        run: cargo run --manifest-path Cargo.toml --package v8-python --bin stub_gen
       - name: Build documentation
         run: uv run --no-sync zensical build --strict
       - name: Upload Pages artifact

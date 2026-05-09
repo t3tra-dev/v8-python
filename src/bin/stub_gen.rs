@@ -1,0 +1,445 @@
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use pyo3_stub_gen::Result;
+
+struct PythonPaths {
+    base_prefix: PathBuf,
+    base_exec_prefix: PathBuf,
+    platlib: PathBuf,
+}
+
+fn resolve_python() -> anyhow::Result<PathBuf> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let local_venv_bin = manifest_dir.join(".venv").join("bin");
+
+    for candidate in [
+        local_venv_bin.join("python"),
+        local_venv_bin.join("python3"),
+    ] {
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+    }
+
+    if let Ok(venv) = std::env::var("VIRTUAL_ENV") {
+        let bin_dir = PathBuf::from(venv).join("bin");
+
+        let python = bin_dir.join("python");
+        if python.is_file() {
+            return Ok(python);
+        }
+
+        let python3 = bin_dir.join("python3");
+        if python3.is_file() {
+            return Ok(python3);
+        }
+
+        let mut versioned: Vec<PathBuf> = std::fs::read_dir(&bin_dir)?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|s| s.to_str())
+                    .map(|name| name.starts_with("python3."))
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        versioned.sort();
+        if let Some(path) = versioned.pop() {
+            return Ok(path);
+        }
+    }
+
+    Ok(PathBuf::from("python3"))
+}
+
+fn python_paths(python: &Path) -> anyhow::Result<PythonPaths> {
+    let output = Command::new(python)
+        .env_remove("PYTHONHOME")
+        .env_remove("PYTHONPATH")
+        .args([
+            "-c",
+            "import sys, sysconfig; print(sys.base_prefix); print(sys.base_exec_prefix); print(sysconfig.get_path('platlib'))",
+        ])
+        .output()?;
+
+    anyhow::ensure!(
+        output.status.success(),
+        "failed to get Python paths from {}: {}",
+        python.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout)?;
+    let mut lines = stdout.lines();
+    let base_prefix = lines
+        .next()
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow::anyhow!("Python did not report sys.base_prefix"))?;
+    let base_exec_prefix = lines
+        .next()
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow::anyhow!("Python did not report sys.base_exec_prefix"))?;
+    let platlib = lines
+        .next()
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow::anyhow!("Python did not report platlib path"))?;
+
+    Ok(PythonPaths {
+        base_prefix,
+        base_exec_prefix,
+        platlib,
+    })
+}
+
+fn python_home(paths: &PythonPaths) -> String {
+    if paths.base_prefix == paths.base_exec_prefix {
+        paths.base_prefix.to_string_lossy().into_owned()
+    } else {
+        format!(
+            "{}:{}",
+            paths.base_prefix.to_string_lossy(),
+            paths.base_exec_prefix.to_string_lossy()
+        )
+    }
+}
+
+fn configure_embedded_python() -> anyhow::Result<()> {
+    let Some(executable) = pyo3_build_config::get().executable.as_deref() else {
+        return Ok(());
+    };
+    let paths = python_paths(Path::new(executable))?;
+
+    // SAFETY: stub_gen is single-threaded at startup and sets this before PyO3
+    // initializes CPython through pyo3-stub-gen.
+    unsafe {
+        std::env::set_var("PYTHONHOME", python_home(&paths));
+    }
+
+    Ok(())
+}
+
+fn site_packages() -> anyhow::Result<PathBuf> {
+    let python = resolve_python()?;
+    Ok(python_paths(&python)?.platlib)
+}
+
+fn main() -> Result<()> {
+    configure_embedded_python()?;
+
+    let mut stub = v8_python_lib::stub_info()?;
+    stub.python_root = site_packages()?;
+    stub.is_mixed_layout = true;
+    stub.generate()?;
+    let package_root = stub.python_root.join("v8");
+    postprocess_root_stub(&package_root.join("__init__.pyi"))?;
+    write_docs_stubs(&package_root)?;
+    Ok(())
+}
+
+fn write_docs_stubs(package_root: &Path) -> anyhow::Result<()> {
+    let docs_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(".cache")
+        .join("mkdocstrings-stubs")
+        .join("v8");
+
+    std::fs::create_dir_all(&docs_root)?;
+    write_docs_stub_module(
+        &package_root.join("__init__.pyi"),
+        &docs_root.join("__init__.py"),
+    )?;
+
+    let api_source = package_root.join("api").join("__init__.pyi");
+    if api_source.is_file() {
+        let api_root = docs_root.join("api");
+        std::fs::create_dir_all(&api_root)?;
+        write_docs_stub_module(&api_source, &api_root.join("__init__.py"))?;
+    }
+
+    Ok(())
+}
+
+fn write_docs_stub_module(source: &Path, target: &Path) -> anyhow::Result<()> {
+    let mut content = std::fs::read_to_string(source)?;
+    content = content.replacen(
+        "# This file is automatically generated by pyo3_stub_gen",
+        "# This file is automatically generated by stub_gen for mkdocstrings",
+        1,
+    );
+    content = content.replace("builtins.", "");
+    content = modernize_optional_annotations(&content);
+    content = content.replace("typing.Literal[", "Literal[");
+
+    if source.file_name().and_then(|name| name.to_str()) == Some("__init__.pyi")
+        && source
+            .parent()
+            .and_then(|path| path.file_name())
+            .and_then(|name| name.to_str())
+            != Some("api")
+    {
+        content = add_docs_overload_implementations(content)?;
+    }
+    content = content.replace("collections.abc.", "");
+    content = content.replace("datetime.datetime", "datetime");
+    content = content.replace("logging.Logger", "Logger");
+    content = content.replace("v8.", "");
+
+    std::fs::write(target, content)?;
+    Ok(())
+}
+
+fn modernize_optional_annotations(content: &str) -> String {
+    let needle = "typing.Optional[";
+    let mut output = String::with_capacity(content.len());
+    let mut rest = content;
+
+    while let Some(start) = rest.find(needle) {
+        output.push_str(&rest[..start]);
+        let annotation_start = start + needle.len();
+        let mut depth = 1usize;
+        let mut annotation_end = None;
+
+        for (offset, ch) in rest[annotation_start..].char_indices() {
+            match ch {
+                '[' => depth += 1,
+                ']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        annotation_end = Some(annotation_start + offset);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let Some(annotation_end) = annotation_end else {
+            output.push_str(&rest[start..]);
+            return output;
+        };
+
+        output.push_str(&rest[annotation_start..annotation_end]);
+        output.push_str(" | None");
+        rest = &rest[annotation_end + 1..];
+    }
+
+    output.push_str(rest);
+    output
+}
+
+fn add_docs_overload_implementations(content: String) -> anyhow::Result<String> {
+    let content = replace_required(
+        content,
+        r#"    @typing.overload
+    def host_function(self, function: None = None, *, name: str | None = None) -> collections.abc.Callable[[_F], _F]:
+        r"""
+        Register a Python callable as a JavaScript global function.
+        
+        Can be used directly or as a decorator. When `name` is omitted, the
+        callable's `__name__` is used as the JavaScript global name.
+        """
+"#,
+        r#"    @typing.overload
+    def host_function(self, function: None = None, *, name: str | None = None) -> collections.abc.Callable[[_F], _F]:
+        r"""
+        Register a Python callable as a JavaScript global function.
+        
+        Can be used directly or as a decorator. When `name` is omitted, the
+        callable's `__name__` is used as the JavaScript global name.
+        """
+    def host_function(self, function: _F | None = None, *, name: str | None = None) -> _F | collections.abc.Callable[[_F], _F]:
+        r"""
+        Register a Python callable as a JavaScript global function.
+        
+        Can be used directly or as a decorator. When `name` is omitted, the
+        callable's `__name__` is used as the JavaScript global name.
+        """
+"#,
+    )?;
+    let content = replace_required(
+        content,
+        r#"    @typing.overload
+    def class_(self, cls: None = None, *, name: str | None = None) -> collections.abc.Callable[[_C], _C]:
+        r"""
+        Register a Python class as a JavaScript constructor template.
+        
+        Can be used directly or as a decorator. Methods and properties visible
+        on the Python class are exposed through V8 object templates.
+        """
+"#,
+        r#"    @typing.overload
+    def class_(self, cls: None = None, *, name: str | None = None) -> collections.abc.Callable[[_C], _C]:
+        r"""
+        Register a Python class as a JavaScript constructor template.
+        
+        Can be used directly or as a decorator. Methods and properties visible
+        on the Python class are exposed through V8 object templates.
+        """
+    def class_(self, cls: _C | None = None, *, name: str | None = None) -> _C | collections.abc.Callable[[_C], _C]:
+        r"""
+        Register a Python class as a JavaScript constructor template.
+        
+        Can be used directly or as a decorator. Methods and properties visible
+        on the Python class are exposed through V8 object templates.
+        """
+"#,
+    )?;
+    let content = replace_required(
+        content,
+        r#"    @typing.overload
+    def host_function(self, function: None = None, *, name: str | None = None) -> collections.abc.Callable[[_F], _F]:
+        r"""
+        Register a Python callable as a JavaScript global function for this context.
+        """
+"#,
+        r#"    @typing.overload
+    def host_function(self, function: None = None, *, name: str | None = None) -> collections.abc.Callable[[_F], _F]:
+        r"""
+        Register a Python callable as a JavaScript global function for this context.
+        """
+    def host_function(self, function: _F | None = None, *, name: str | None = None) -> _F | collections.abc.Callable[[_F], _F]:
+        r"""
+        Register a Python callable as a JavaScript global function for this context.
+        """
+"#,
+    )?;
+    replace_required(
+        content,
+        r#"    @typing.overload
+    def class_(self, cls: None = None, *, name: str | None = None) -> collections.abc.Callable[[_C], _C]:
+        r"""
+        Register a Python class as a JavaScript constructor template for this context.
+        """
+"#,
+        r#"    @typing.overload
+    def class_(self, cls: None = None, *, name: str | None = None) -> collections.abc.Callable[[_C], _C]:
+        r"""
+        Register a Python class as a JavaScript constructor template for this context.
+        """
+    def class_(self, cls: _C | None = None, *, name: str | None = None) -> _C | collections.abc.Callable[[_C], _C]:
+        r"""
+        Register a Python class as a JavaScript constructor template for this context.
+        """
+"#,
+    )
+}
+
+fn postprocess_root_stub(path: &Path) -> anyhow::Result<()> {
+    let mut content = std::fs::read_to_string(path)?;
+
+    if !content.contains("_F = typing.TypeVar") {
+        content = replace_required(
+            content,
+            "\n@typing.final\nclass Array:",
+            "\n_F = typing.TypeVar(\"_F\", bound=collections.abc.Callable[..., object])\n_C = typing.TypeVar(\"_C\", bound=type[object])\n\n@typing.final\nclass Array:",
+        )?;
+    }
+
+    content = replace_required(
+        content,
+        r#"    def host_function(self, function: _HostCallable | None = None, *, name: typing.Optional[builtins.str] = None) -> _HostCallable | _HostFunctionDecorator:
+        r"""
+        Register a Python callable as a JavaScript global function.
+        
+        Can be used directly or as a decorator. When `name` is omitted, the
+        callable's `__name__` is used as the JavaScript global name.
+        """
+"#,
+        r#"    @typing.overload
+    def host_function(self, function: _F, *, name: typing.Optional[builtins.str] = None) -> _F:
+        r"""
+        Register a Python callable as a JavaScript global function.
+        
+        Can be used directly or as a decorator. When `name` is omitted, the
+        callable's `__name__` is used as the JavaScript global name.
+        """
+    @typing.overload
+    def host_function(self, function: None = None, *, name: typing.Optional[builtins.str] = None) -> collections.abc.Callable[[_F], _F]:
+        r"""
+        Register a Python callable as a JavaScript global function.
+        
+        Can be used directly or as a decorator. When `name` is omitted, the
+        callable's `__name__` is used as the JavaScript global name.
+        """
+"#,
+    )?;
+    content = replace_required(
+        content,
+        r#"    def class_(self, cls: _HostClassLike | None = None, *, name: typing.Optional[builtins.str] = None) -> _HostClassDecorator:
+        r"""
+        Register a Python class as a JavaScript constructor template.
+        
+        Can be used directly or as a decorator. Methods and properties visible
+        on the Python class are exposed through V8 object templates.
+        """
+"#,
+        r#"    @typing.overload
+    def class_(self, cls: _C, *, name: typing.Optional[builtins.str] = None) -> _C:
+        r"""
+        Register a Python class as a JavaScript constructor template.
+        
+        Can be used directly or as a decorator. Methods and properties visible
+        on the Python class are exposed through V8 object templates.
+        """
+    @typing.overload
+    def class_(self, cls: None = None, *, name: typing.Optional[builtins.str] = None) -> collections.abc.Callable[[_C], _C]:
+        r"""
+        Register a Python class as a JavaScript constructor template.
+        
+        Can be used directly or as a decorator. Methods and properties visible
+        on the Python class are exposed through V8 object templates.
+        """
+"#,
+    )?;
+    content = replace_required(
+        content,
+        r#"    def host_function(self, function: _HostCallable | None = None, *, name: typing.Optional[builtins.str] = None) -> _HostCallable | _HostFunctionDecorator:
+        r"""
+        Register a Python callable as a JavaScript global function for this context.
+        """
+"#,
+        r#"    @typing.overload
+    def host_function(self, function: _F, *, name: typing.Optional[builtins.str] = None) -> _F:
+        r"""
+        Register a Python callable as a JavaScript global function for this context.
+        """
+    @typing.overload
+    def host_function(self, function: None = None, *, name: typing.Optional[builtins.str] = None) -> collections.abc.Callable[[_F], _F]:
+        r"""
+        Register a Python callable as a JavaScript global function for this context.
+        """
+"#,
+    )?;
+    content = replace_required(
+        content,
+        r#"    def class_(self, cls: _HostClassLike | None = None, *, name: typing.Optional[builtins.str] = None) -> _HostClassDecorator:
+        r"""
+        Register a Python class as a JavaScript constructor template for this context.
+        """
+"#,
+        r#"    @typing.overload
+    def class_(self, cls: _C, *, name: typing.Optional[builtins.str] = None) -> _C:
+        r"""
+        Register a Python class as a JavaScript constructor template for this context.
+        """
+    @typing.overload
+    def class_(self, cls: None = None, *, name: typing.Optional[builtins.str] = None) -> collections.abc.Callable[[_C], _C]:
+        r"""
+        Register a Python class as a JavaScript constructor template for this context.
+        """
+"#,
+    )?;
+
+    std::fs::write(path, content)?;
+    Ok(())
+}
+
+fn replace_required(content: String, from: &str, to: &str) -> anyhow::Result<String> {
+    anyhow::ensure!(
+        content.contains(from),
+        "generated root stub did not contain expected block"
+    );
+    Ok(content.replacen(from, to, 1))
+}
