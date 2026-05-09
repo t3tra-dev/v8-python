@@ -25,8 +25,10 @@ jobs:
             rust_target: x86_64-unknown-linux-gnu
             container: quay.io/pypa/manylinux_2_28_x86_64:latest
             v8_from_source: "1"
-            extra_gn_args: v8_enable_temporal_support=false
-            docker_options: -e V8_FROM_SOURCE=1 -e EXTRA_GN_ARGS=v8_enable_temporal_support=false
+            extra_gn_args: v8_enable_temporal_support=false v8_monolithic_for_shared_library=true
+            docker_options: >-
+              -e V8_FROM_SOURCE=1
+              -e "EXTRA_GN_ARGS=v8_enable_temporal_support=false v8_monolithic_for_shared_library=true"
           - runner: ubuntu-24.04-arm
             target: aarch64
             rust_target: aarch64-unknown-linux-gnu
@@ -48,8 +50,8 @@ jobs:
           # third_party/rust/chromium_crates_io/vendor tree needed by the
           # Temporal Rust dependency, so source builds avoid those GN targets.
           EXTRA_GN_ARGS: ${{ matrix.extra_gn_args }}
-          # Source builds download Chromium clang into target/<triple>/release.
-          # Bindgen needs libclang from that toolchain after V8 is built.
+          # Source builds use Chromium clang under target/<triple>/release.
+          # Bindgen also needs the separate Chromium libclang package there.
           LIBCLANG_PATH: ${{ github.workspace }}/target/${{ matrix.rust_target }}/release/clang/lib
           LD_LIBRARY_PATH: ${{ github.workspace }}/target/${{ matrix.rust_target }}/release/clang/lib
         with:
@@ -59,6 +61,15 @@ jobs:
           manylinux: "2_28"
           container: ${{ matrix.container }}
           docker-options: ${{ matrix.docker_options }} -e LIBCLANG_PATH=${{ github.workspace }}/target/${{ matrix.rust_target }}/release/clang/lib -e LD_LIBRARY_PATH=${{ github.workspace }}/target/${{ matrix.rust_target }}/release/clang/lib
+          before-script-linux: |
+            if [ "${{ matrix.v8_from_source }}" = "1" ]; then
+              cargo fetch --locked
+              V8_SRC="$(find /root/.cargo/registry/src -maxdepth 2 -type d -name 'v8-147.4.0' -print -quit)"
+              CLANG_DIR="${{ github.workspace }}/target/${{ matrix.rust_target }}/release/clang"
+              python3 "$V8_SRC/tools/clang/scripts/update.py" --output-dir "$CLANG_DIR"
+              python3 "$V8_SRC/tools/clang/scripts/update.py" --output-dir "$CLANG_DIR" --package libclang
+              test -n "$(find "$CLANG_DIR/lib" -name 'libclang.so*' -print -quit)"
+            fi
           args: >-
             --release
             --out dist
