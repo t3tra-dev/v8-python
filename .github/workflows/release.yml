@@ -14,7 +14,7 @@ env:
 
 jobs:
   linux:
-    name: Linux ${{ matrix.manylinux }} ${{ matrix.target }} py${{ matrix.python.version }}
+    name: Linux ${{ matrix.target }} py${{ matrix.python.version }}
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
@@ -28,8 +28,9 @@ jobs:
             tag: cp312
           - version: "3.13"
             tag: cp313
-        target: [x86_64, x86, aarch64, armv7, s390x, ppc64le]
-        manylinux: [auto]
+        # rusty_v8 v147.4.0 publishes prebuilt Linux archives only for these
+        # GNU targets. musllinux and other architectures require source builds.
+        target: [x86_64, aarch64]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -39,48 +40,13 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          manylinux: ${{ matrix.manylinux }}
+          manylinux: auto
           args: --release --out dist --interpreter python${{ matrix.python.version }}
           sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-linux-${{ matrix.manylinux }}-${{ matrix.target }}-${{ matrix.python.tag }}
-          path: dist
-          if-no-files-found: error
-
-  musllinux:
-    name: Linux musllinux ${{ matrix.target }} py${{ matrix.python.version }}
-    runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        python:
-          - version: "3.10"
-            tag: cp310
-          - version: "3.11"
-            tag: cp311
-          - version: "3.12"
-            tag: cp312
-          - version: "3.13"
-            tag: cp313
-        target: [x86_64, x86, aarch64, armv7]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python.version }}
-      - name: Build wheel
-        uses: PyO3/maturin-action@v1
-        with:
-          target: ${{ matrix.target }}
-          manylinux: musllinux_1_2
-          args: --release --out dist --interpreter python${{ matrix.python.version }}
-          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
-      - name: Upload wheel
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheels-musllinux-${{ matrix.target }}-${{ matrix.python.tag }}
+          name: wheels-linux-${{ matrix.target }}-${{ matrix.python.tag }}
           path: dist
           if-no-files-found: error
 
@@ -113,30 +79,6 @@ jobs:
             target: x64
             python:
               architecture: x64
-              version: "3.13"
-              tag: cp313
-          - runner: windows-latest
-            target: x86
-            python:
-              architecture: x86
-              version: "3.10"
-              tag: cp310
-          - runner: windows-latest
-            target: x86
-            python:
-              architecture: x86
-              version: "3.11"
-              tag: cp311
-          - runner: windows-latest
-            target: x86
-            python:
-              architecture: x86
-              version: "3.12"
-              tag: cp312
-          - runner: windows-latest
-            target: x86
-            python:
-              architecture: x86
               version: "3.13"
               tag: cp313
           - runner: windows-11-arm
@@ -235,7 +177,7 @@ jobs:
     name: Publish to PyPI
     runs-on: ubuntu-latest
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-    needs: [linux, musllinux, windows, macos, sdist]
+    needs: [linux, windows, macos, sdist]
     permissions:
       contents: read
       id-token: write
