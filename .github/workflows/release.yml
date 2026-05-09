@@ -42,16 +42,16 @@ jobs:
         uses: PyO3/maturin-action@v1
         env:
           # rusty_v8's prebuilt Linux archive uses a TLS model that cannot be
-          # linked into a Python extension module on x86_64. Source builds
-          # inject V8_TLS_USED_IN_LIBRARY through the v8 crate build script.
+          # linked into a Python extension module on x86_64. Source builds set
+          # v8_monolithic_for_shared_library so V8 uses shared-library-safe TLS.
           # aarch64 uses the published rusty_v8 archive.
           V8_FROM_SOURCE: ${{ matrix.v8_from_source }}
           # The crates.io v8 archive does not include Chromium's
           # third_party/rust/chromium_crates_io/vendor tree needed by the
           # Temporal Rust dependency, so source builds avoid those GN targets.
           EXTRA_GN_ARGS: ${{ matrix.extra_gn_args }}
-          LIBCLANG_PATH: ${{ github.workspace }}/target/${{ matrix.rust_target }}/release/libclang
-          LD_LIBRARY_PATH: ${{ github.workspace }}/target/${{ matrix.rust_target }}/release/libclang
+          LIBCLANG_PATH: ${{ github.workspace }}/target/${{ matrix.rust_target }}/release/llvm-toolset/lib
+          LD_LIBRARY_PATH: ${{ github.workspace }}/target/${{ matrix.rust_target }}/release/llvm-toolset/lib
         with:
           target: ${{ matrix.target }}
           # Source-building V8 needs Chromium's `gn` binary, which requires
@@ -60,8 +60,8 @@ jobs:
           container: ${{ matrix.container }}
           docker-options: >-
             ${{ matrix.docker_options }}
-            -e LIBCLANG_PATH=${{ github.workspace }}/target/${{ matrix.rust_target }}/release/libclang
-            -e LD_LIBRARY_PATH=${{ github.workspace }}/target/${{ matrix.rust_target }}/release/libclang
+            -e LIBCLANG_PATH=${{ github.workspace }}/target/${{ matrix.rust_target }}/release/llvm-toolset/lib
+            -e LD_LIBRARY_PATH=${{ github.workspace }}/target/${{ matrix.rust_target }}/release/llvm-toolset/lib
           before-script-linux: |
             if [ "${{ matrix.v8_from_source }}" = "1" ]; then
               env -u RUSTC_WRAPPER cargo fetch --locked
@@ -72,19 +72,56 @@ jobs:
               fi
               CLANG_DIR="${{ github.workspace }}/target/${{ matrix.rust_target }}/release/clang"
               python3 "$V8_SRC/tools/clang/scripts/update.py" --output-dir "$CLANG_DIR"
-              python3 "$V8_SRC/tools/clang/scripts/update.py" --output-dir "$CLANG_DIR" --package libclang
-              LIBCLANG_SO="$(find "$CLANG_DIR" -name 'libclang.so*' -print -quit)"
+
+              install_llvm_toolset() {
+                if command -v dnf >/dev/null 2>&1; then
+                  dnf install -y llvm-toolset clang-libs && return 0
+                  dnf module install -y llvm-toolset && return 0
+                  dnf install -y clang clang-libs && return 0
+                fi
+                if command -v yum >/dev/null 2>&1; then
+                  yum install -y llvm-toolset clang-libs && return 0
+                  yum module install -y llvm-toolset && return 0
+                  yum install -y clang clang-libs && return 0
+                fi
+                return 1
+              }
+
+              if ! install_llvm_toolset; then
+                echo "::error::Could not install LLVM Toolset or clang-libs in the manylinux container."
+                exit 1
+              fi
+
+              LIBCLANG_SEARCH_DIRS=""
+              for dir in /opt/rh /usr/lib64 /usr/lib; do
+                if [ -d "$dir" ]; then
+                  LIBCLANG_SEARCH_DIRS="$LIBCLANG_SEARCH_DIRS $dir"
+                fi
+              done
+              LIBCLANG_SO="$(find $LIBCLANG_SEARCH_DIRS -name 'libclang.so*' -print 2>/dev/null | sort -Vr | head -n1 || true)"
               if [ -z "$LIBCLANG_SO" ]; then
-                echo "::error::Could not find libclang.so under $CLANG_DIR after downloading Chromium's libclang package."
-                find "$CLANG_DIR" -maxdepth 4 \( -type f -o -type l \) -print | sort | head -200
+                echo "::error::Could not find libclang.so after installing LLVM Toolset."
+                find $LIBCLANG_SEARCH_DIRS -maxdepth 6 -name '*clang*' -print 2>/dev/null | sort | head -200 || true
                 exit 1
               fi
               LIBCLANG_DIR="$(dirname "$LIBCLANG_SO")"
-              LIBCLANG_PATH_DIR="${{ github.workspace }}/target/${{ matrix.rust_target }}/release/libclang"
-              mkdir -p "$(dirname "$LIBCLANG_PATH_DIR")"
-              rm -rf "$LIBCLANG_PATH_DIR"
-              ln -s "$LIBCLANG_DIR" "$LIBCLANG_PATH_DIR"
-              echo "Using LIBCLANG_PATH=$LIBCLANG_PATH_DIR -> $LIBCLANG_DIR"
+              LLVM_ROOT="$(dirname "$LIBCLANG_DIR")"
+              CLANG_BIN="$LLVM_ROOT/bin/clang"
+              if [ ! -x "$CLANG_BIN" ]; then
+                CLANG_BIN="$(command -v clang || true)"
+              fi
+              if [ ! -x "$CLANG_BIN" ]; then
+                echo "::error::Could not find a clang executable matching the installed libclang."
+                exit 1
+              fi
+
+              LLVM_TOOLSET_DIR="${{ github.workspace }}/target/${{ matrix.rust_target }}/release/llvm-toolset"
+              rm -rf "$LLVM_TOOLSET_DIR"
+              mkdir -p "$LLVM_TOOLSET_DIR"
+              ln -s "$LIBCLANG_DIR" "$LLVM_TOOLSET_DIR/lib"
+              ln -s "$(dirname "$CLANG_BIN")" "$LLVM_TOOLSET_DIR/bin"
+              echo "Using LIBCLANG_PATH=$LLVM_TOOLSET_DIR/lib -> $LIBCLANG_DIR"
+              echo "Using clang=$LLVM_TOOLSET_DIR/bin/clang -> $CLANG_BIN"
             fi
           args: >-
             --release
