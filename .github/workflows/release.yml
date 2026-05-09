@@ -50,6 +50,14 @@ jobs:
           # Chromium's downloaded clang is Linux x64 only in this crate. The
           # aarch64 job passes DISABLE_CLANG=1 through this matrix value.
           docker-options: ${{ matrix.docker_options }}
+          before-script-linux: |
+            if [ "${{ matrix.target }}" = "aarch64" ]; then
+              ln -sf "$(command -v gcc)" /usr/local/bin/aarch64-linux-gnu-gcc
+              ln -sf "$(command -v g++)" /usr/local/bin/aarch64-linux-gnu-g++
+              ln -sf "$(command -v ar)" /usr/local/bin/aarch64-linux-gnu-ar
+              ln -sf "$(command -v nm)" /usr/local/bin/aarch64-linux-gnu-nm
+              ln -sf "$(command -v ranlib)" /usr/local/bin/aarch64-linux-gnu-ranlib
+            fi
           args: >-
             --release
             --out dist
