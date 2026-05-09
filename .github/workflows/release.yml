@@ -35,13 +35,17 @@ jobs:
           # linked into a Python extension module. Source builds inject
           # V8_TLS_USED_IN_LIBRARY through the v8 crate build script.
           V8_FROM_SOURCE: "1"
+          # The crates.io v8 archive does not include Chromium's
+          # third_party/rust/chromium_crates_io/vendor tree needed by the
+          # Temporal Rust dependency, so avoid generating those GN targets.
+          EXTRA_GN_ARGS: v8_enable_temporal_support=false
         with:
           target: ${{ matrix.target }}
           # Source-building V8 needs Chromium's `gn` binary, which requires
           # GLIBC_2.18+. manylinux2014 only has glibc 2.17, so use 2_28 here.
           manylinux: "2_28"
           container: ${{ matrix.container }}
-          docker-options: -e V8_FROM_SOURCE=1
+          docker-options: -e V8_FROM_SOURCE=1 -e EXTRA_GN_ARGS=v8_enable_temporal_support=false
           args: >-
             --release
             --out dist
