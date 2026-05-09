@@ -63,7 +63,7 @@ jobs:
           docker-options: ${{ matrix.docker_options }} -e LIBCLANG_PATH=${{ github.workspace }}/target/${{ matrix.rust_target }}/release/clang/lib -e LD_LIBRARY_PATH=${{ github.workspace }}/target/${{ matrix.rust_target }}/release/clang/lib
           before-script-linux: |
             if [ "${{ matrix.v8_from_source }}" = "1" ]; then
-              cargo fetch --locked
+              env -u RUSTC_WRAPPER cargo fetch --locked
               V8_SRC="$(find /root/.cargo/registry/src -maxdepth 2 -type d -name 'v8-147.4.0' -print -quit)"
               CLANG_DIR="${{ github.workspace }}/target/${{ matrix.rust_target }}/release/clang"
               python3 "$V8_SRC/tools/clang/scripts/update.py" --output-dir "$CLANG_DIR"
