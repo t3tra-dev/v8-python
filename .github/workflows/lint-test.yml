@@ -34,13 +34,17 @@ jobs:
         run: uv run --no-sync pyright tests examples
 
   python-tests:
-    name: Python tests
+    name: Python tests py${{ matrix.python_version }}
     runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version: ["3.10", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: ${{ matrix.python_version }}
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true

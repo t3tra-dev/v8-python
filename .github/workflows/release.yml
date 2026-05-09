@@ -14,39 +14,38 @@ env:
 
 jobs:
   linux:
-    name: Linux ${{ matrix.target }} py${{ matrix.python.version }}
-    runs-on: ubuntu-22.04
+    name: Linux ${{ matrix.target }} py3.10-3.14
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        python:
-          - version: "3.10"
-            tag: cp310
-          - version: "3.11"
-            tag: cp311
-          - version: "3.12"
-            tag: cp312
-          - version: "3.13"
-            tag: cp313
-        # rusty_v8 v147.4.0 publishes prebuilt Linux archives only for these
-        # GNU targets. musllinux and other architectures require source builds.
-        target: [x86_64, aarch64]
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64
+          - runner: ubuntu-24.04-arm
+            target: aarch64
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python.version }}
       - name: Build wheel
         uses: PyO3/maturin-action@v1
+        env:
+          # rusty_v8's prebuilt Linux archive uses a TLS model that cannot be
+          # linked into a Python extension module. Source builds inject
+          # V8_TLS_USED_IN_LIBRARY through the v8 crate build script.
+          V8_FROM_SOURCE: "1"
         with:
           target: ${{ matrix.target }}
           manylinux: auto
-          args: --release --out dist --interpreter python${{ matrix.python.version }}
-          sccache: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          docker-options: -e V8_FROM_SOURCE=1
+          args: >-
+            --release
+            --out dist
+            --interpreter python3.10 python3.11 python3.12 python3.13 python3.14
+          sccache: true
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-linux-${{ matrix.target }}-${{ matrix.python.tag }}
+          name: wheels-linux-${{ matrix.target }}
           path: dist
           if-no-files-found: error
 
@@ -81,6 +80,12 @@ jobs:
               architecture: x64
               version: "3.13"
               tag: cp313
+          - runner: windows-latest
+            target: x64
+            python:
+              architecture: x64
+              version: "3.14"
+              tag: cp314
           - runner: windows-11-arm
             target: aarch64
             python:
@@ -99,6 +104,12 @@ jobs:
               architecture: arm64
               version: "3.13"
               tag: cp313
+          - runner: windows-11-arm
+            target: aarch64
+            python:
+              architecture: arm64
+              version: "3.14"
+              tag: cp314
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -133,6 +144,8 @@ jobs:
             tag: cp312
           - version: "3.13"
             tag: cp313
+          - version: "3.14"
+            tag: cp314
         platform:
           - runner: macos-13
             target: x86_64
