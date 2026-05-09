@@ -16,7 +16,7 @@ env:
 
 jobs:
   python:
-    name: Python
+    name: Python static checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,12 +26,32 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
+      - name: Sync Python tooling
+        run: uv sync --locked --only-group dev --no-install-project
+      - name: Generate Python stubs
+        run: cargo run --bin stub_gen
       - name: Ruff
-        run: uv run --locked ruff check .
+        run: uv run --no-sync ruff check .
       - name: Pyright
-        run: uv run --locked pyright tests examples
+        run: uv run --no-sync pyright tests examples
+
+  python-tests:
+    name: Python tests
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - name: Sync Python tooling
+        run: uv sync --locked --only-group dev --no-install-project
+      - name: Build extension
+        run: uv run --no-sync maturin develop
       - name: Python tests
-        run: uv run --locked python -m unittest discover
+        run: uv run --no-sync python -m unittest discover
 
   rust:
     name: Rust
