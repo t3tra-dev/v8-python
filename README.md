@@ -107,3 +107,7 @@ More focused examples are available in the `examples/` directory.
 ```bash
 uv run --group doc zensical serve
 ```
+
+## License
+
+MIT License.
