@@ -50,25 +50,41 @@ jobs:
           # third_party/rust/chromium_crates_io/vendor tree needed by the
           # Temporal Rust dependency, so source builds avoid those GN targets.
           EXTRA_GN_ARGS: ${{ matrix.extra_gn_args }}
-          # Source builds use Chromium clang under target/<triple>/release.
-          # Bindgen also needs the separate Chromium libclang package there.
-          LIBCLANG_PATH: ${{ github.workspace }}/target/${{ matrix.rust_target }}/release/clang/lib
-          LD_LIBRARY_PATH: ${{ github.workspace }}/target/${{ matrix.rust_target }}/release/clang/lib
+          LIBCLANG_PATH: ${{ github.workspace }}/target/${{ matrix.rust_target }}/release/libclang
+          LD_LIBRARY_PATH: ${{ github.workspace }}/target/${{ matrix.rust_target }}/release/libclang
         with:
           target: ${{ matrix.target }}
           # Source-building V8 needs Chromium's `gn` binary, which requires
           # GLIBC_2.18+. manylinux2014 only has glibc 2.17, so use 2_28 here.
           manylinux: "2_28"
           container: ${{ matrix.container }}
-          docker-options: ${{ matrix.docker_options }} -e LIBCLANG_PATH=${{ github.workspace }}/target/${{ matrix.rust_target }}/release/clang/lib -e LD_LIBRARY_PATH=${{ github.workspace }}/target/${{ matrix.rust_target }}/release/clang/lib
+          docker-options: >-
+            ${{ matrix.docker_options }}
+            -e LIBCLANG_PATH=${{ github.workspace }}/target/${{ matrix.rust_target }}/release/libclang
+            -e LD_LIBRARY_PATH=${{ github.workspace }}/target/${{ matrix.rust_target }}/release/libclang
           before-script-linux: |
             if [ "${{ matrix.v8_from_source }}" = "1" ]; then
               env -u RUSTC_WRAPPER cargo fetch --locked
               V8_SRC="$(find /root/.cargo/registry/src -maxdepth 2 -type d -name 'v8-147.4.0' -print -quit)"
+              if [ -z "$V8_SRC" ]; then
+                echo "::error::Could not find the v8-147.4.0 crate source after cargo fetch."
+                exit 1
+              fi
               CLANG_DIR="${{ github.workspace }}/target/${{ matrix.rust_target }}/release/clang"
               python3 "$V8_SRC/tools/clang/scripts/update.py" --output-dir "$CLANG_DIR"
               python3 "$V8_SRC/tools/clang/scripts/update.py" --output-dir "$CLANG_DIR" --package libclang
-              test -n "$(find "$CLANG_DIR/lib" -name 'libclang.so*' -print -quit)"
+              LIBCLANG_SO="$(find "$CLANG_DIR" -name 'libclang.so*' -print -quit)"
+              if [ -z "$LIBCLANG_SO" ]; then
+                echo "::error::Could not find libclang.so under $CLANG_DIR after downloading Chromium's libclang package."
+                find "$CLANG_DIR" -maxdepth 4 \( -type f -o -type l \) -print | sort | head -200
+                exit 1
+              fi
+              LIBCLANG_DIR="$(dirname "$LIBCLANG_SO")"
+              LIBCLANG_PATH_DIR="${{ github.workspace }}/target/${{ matrix.rust_target }}/release/libclang"
+              mkdir -p "$(dirname "$LIBCLANG_PATH_DIR")"
+              rm -rf "$LIBCLANG_PATH_DIR"
+              ln -s "$LIBCLANG_DIR" "$LIBCLANG_PATH_DIR"
+              echo "Using LIBCLANG_PATH=$LIBCLANG_PATH_DIR -> $LIBCLANG_DIR"
             fi
           args: >-
             --release
