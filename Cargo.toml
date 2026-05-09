@@ -1,0 +1,15 @@
+[package]
+name = "v8-python"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "v8_python_lib"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+anyhow = "1.0.102"
+pyo3 = "0.28.2"
+pyo3-build-config = { version = "0.28.3", features = ["resolve-config"] }
+pyo3-stub-gen = "0.22.2"
+v8 = "147.4.0"

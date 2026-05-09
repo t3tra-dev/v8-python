@@ -1,0 +1,72 @@
+[project]
+site_name = "v8-python"
+site_description = "Python bindings for embedding V8 with denoland/rusty_v8."
+repo_url = "https://github.com/t3tra-dev/v8-python"
+repo_name = "t3tra-dev/v8-python"
+docs_dir = "docs"
+site_dir = "site"
+nav = [
+  {"Home" = "index.md"},
+  {"Tutorial" = "tutorial.md"},
+  {"API Reference" = [
+    {"Overview" = "api-reference/index.md"},
+    {"Runtime API" = "api-reference/runtime-api.md"},
+    {"Host APIs" = "api-reference/host-apis.md"},
+    {"JS Object" = "api-reference/js-object.md"},
+  ]},
+]
+
+[project.theme]
+variant = "modern"
+features = [
+  "content.code.copy",
+  "navigation.sections",
+  "navigation.top",
+]
+
+# Palette toggle for automatic mode
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "lucide/sun-moon"
+toggle.name = "Switch to light mode"
+
+# Palette toggle for light mode
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+# Palette toggle for dark mode
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
+
+[project.markdown_extensions.toc]
+permalink = true
+
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+line_spans = "__span"
+pygments_lang_class = true
+
+[project.markdown_extensions.pymdownx.superfences]
+
+[project.plugins.mkdocstrings.handlers.python]
+inventories = ["https://docs.python.org/3/objects.inv"]
+paths = [".cache/mkdocstrings-stubs", "."]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+allow_inspection = false
+annotations_path = "brief"
+docstring_style = "google"
+line_length = 88
+modernize_annotations = true
+show_overloads = true
+show_signature = true
+show_signature_annotations = true
+show_signature_type_parameters = true
+show_source = false
+signature_crossrefs = true
