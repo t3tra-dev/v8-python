@@ -24,10 +24,6 @@ jobs:
             target: x86_64
             container: quay.io/pypa/manylinux_2_28_x86_64:latest
             docker_options: -e V8_FROM_SOURCE=1 -e EXTRA_GN_ARGS=v8_enable_temporal_support=false
-          - runner: ubuntu-24.04-arm
-            target: aarch64
-            container: quay.io/pypa/manylinux_2_28_aarch64:latest
-            docker_options: -e V8_FROM_SOURCE=1 -e EXTRA_GN_ARGS=v8_enable_temporal_support=false -e DISABLE_CLANG=1
     steps:
       - uses: actions/checkout@v4
       - name: Build wheel
@@ -47,17 +43,7 @@ jobs:
           # GLIBC_2.18+. manylinux2014 only has glibc 2.17, so use 2_28 here.
           manylinux: "2_28"
           container: ${{ matrix.container }}
-          # Chromium's downloaded clang is Linux x64 only in this crate. The
-          # aarch64 job passes DISABLE_CLANG=1 through this matrix value.
           docker-options: ${{ matrix.docker_options }}
-          before-script-linux: |
-            if [ "${{ matrix.target }}" = "aarch64" ]; then
-              ln -sf "$(command -v gcc)" /usr/local/bin/aarch64-linux-gnu-gcc
-              ln -sf "$(command -v g++)" /usr/local/bin/aarch64-linux-gnu-g++
-              ln -sf "$(command -v ar)" /usr/local/bin/aarch64-linux-gnu-ar
-              ln -sf "$(command -v nm)" /usr/local/bin/aarch64-linux-gnu-nm
-              ln -sf "$(command -v ranlib)" /usr/local/bin/aarch64-linux-gnu-ranlib
-            fi
           args: >-
             --release
             --out dist
