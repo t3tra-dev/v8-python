@@ -25,10 +25,10 @@ jobs:
             rust_target: x86_64-unknown-linux-gnu
             container: quay.io/pypa/manylinux_2_28_x86_64:latest
             v8_from_source: "1"
-            extra_gn_args: v8_enable_temporal_support=false v8_monolithic_for_shared_library=true
+            extra_gn_args: v8_enable_temporal_support=false v8_monolithic=true v8_monolithic_for_shared_library=true v8_use_external_startup_data=false
             docker_options: >-
               -e V8_FROM_SOURCE=1
-              -e "EXTRA_GN_ARGS=v8_enable_temporal_support=false v8_monolithic_for_shared_library=true"
+              -e "EXTRA_GN_ARGS=v8_enable_temporal_support=false v8_monolithic=true v8_monolithic_for_shared_library=true v8_use_external_startup_data=false"
           - runner: ubuntu-24.04-arm
             target: aarch64
             rust_target: aarch64-unknown-linux-gnu
@@ -43,7 +43,8 @@ jobs:
         env:
           # rusty_v8's prebuilt Linux archive uses a TLS model that cannot be
           # linked into a Python extension module on x86_64. Source builds set
-          # v8_monolithic_for_shared_library so V8 uses shared-library-safe TLS.
+          # v8_monolithic + v8_monolithic_for_shared_library so V8 uses
+          # shared-library-safe TLS.
           # aarch64 uses the published rusty_v8 archive.
           V8_FROM_SOURCE: ${{ matrix.v8_from_source }}
           # The crates.io v8 archive does not include Chromium's
