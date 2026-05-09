@@ -56,7 +56,7 @@ pygments_lang_class = true
 
 [project.plugins.mkdocstrings.handlers.python]
 inventories = ["https://docs.python.org/3/objects.inv"]
-paths = [".cache/mkdocstrings-stubs", "."]
+paths = ["docs/_stubs", "."]
 
 [project.plugins.mkdocstrings.handlers.python.options]
 allow_inspection = false

@@ -36,6 +36,13 @@ cache-keys = [
     { file = "src/**/*.rs" },
 ]
 
+[tool.ruff]
+extend-exclude = [
+    "docs/_stubs",
+    "typings",
+]
+
 [tool.pyright]
 pythonVersion = "3.10"
+stubPath = "typings"
 typeCheckingMode = "strict"

@@ -135,14 +135,36 @@ fn main() -> Result<()> {
     stub.generate()?;
     let package_root = stub.python_root.join("v8");
     postprocess_root_stub(&package_root.join("__init__.pyi"))?;
+    write_type_stubs(&package_root)?;
     write_docs_stubs(&package_root)?;
+    Ok(())
+}
+
+fn write_type_stubs(package_root: &Path) -> anyhow::Result<()> {
+    let type_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("typings")
+        .join("v8");
+
+    std::fs::create_dir_all(&type_root)?;
+    std::fs::copy(
+        package_root.join("__init__.pyi"),
+        type_root.join("__init__.pyi"),
+    )?;
+
+    let api_source = package_root.join("api").join("__init__.pyi");
+    if api_source.is_file() {
+        let api_root = type_root.join("api");
+        std::fs::create_dir_all(&api_root)?;
+        std::fs::copy(api_source, api_root.join("__init__.pyi"))?;
+    }
+
     Ok(())
 }
 
 fn write_docs_stubs(package_root: &Path) -> anyhow::Result<()> {
     let docs_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join(".cache")
-        .join("mkdocstrings-stubs")
+        .join("docs")
+        .join("_stubs")
         .join("v8");
 
     std::fs::create_dir_all(&docs_root)?;

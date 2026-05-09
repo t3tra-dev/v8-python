@@ -28,8 +28,6 @@ jobs:
           enable-cache: true
       - name: Sync Python tooling
         run: uv sync --locked --only-group dev --no-install-project
-      - name: Generate Python stubs
-        run: cargo run --manifest-path Cargo.toml --package v8-python --bin stub_gen
       - name: Ruff
         run: uv run --no-sync ruff check .
       - name: Pyright
@@ -55,7 +53,7 @@ jobs:
 
   rust:
     name: Rust
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
