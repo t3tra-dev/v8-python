@@ -22,12 +22,14 @@ jobs:
         include:
           - runner: ubuntu-22.04
             target: x86_64
+            rust_target: x86_64-unknown-linux-gnu
             container: quay.io/pypa/manylinux_2_28_x86_64:latest
             v8_from_source: "1"
             extra_gn_args: v8_enable_temporal_support=false
             docker_options: -e V8_FROM_SOURCE=1 -e EXTRA_GN_ARGS=v8_enable_temporal_support=false
           - runner: ubuntu-24.04-arm
             target: aarch64
+            rust_target: aarch64-unknown-linux-gnu
             container: quay.io/pypa/manylinux_2_28_aarch64:latest
             v8_from_source: "0"
             extra_gn_args: ""
@@ -46,13 +48,17 @@ jobs:
           # third_party/rust/chromium_crates_io/vendor tree needed by the
           # Temporal Rust dependency, so source builds avoid those GN targets.
           EXTRA_GN_ARGS: ${{ matrix.extra_gn_args }}
+          # Source builds download Chromium clang into target/<triple>/release.
+          # Bindgen needs libclang from that toolchain after V8 is built.
+          LIBCLANG_PATH: ${{ github.workspace }}/target/${{ matrix.rust_target }}/release/clang/lib
+          LD_LIBRARY_PATH: ${{ github.workspace }}/target/${{ matrix.rust_target }}/release/clang/lib
         with:
           target: ${{ matrix.target }}
           # Source-building V8 needs Chromium's `gn` binary, which requires
           # GLIBC_2.18+. manylinux2014 only has glibc 2.17, so use 2_28 here.
           manylinux: "2_28"
           container: ${{ matrix.container }}
-          docker-options: ${{ matrix.docker_options }}
+          docker-options: ${{ matrix.docker_options }} -e LIBCLANG_PATH=${{ github.workspace }}/target/${{ matrix.rust_target }}/release/clang/lib -e LD_LIBRARY_PATH=${{ github.workspace }}/target/${{ matrix.rust_target }}/release/clang/lib
           args: >-
             --release
             --out dist
